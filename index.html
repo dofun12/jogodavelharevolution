@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gomoku 9x9 - Arcade Edition</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        /* --- VISUAL POLISH: CRT & NEON --- */
+        :root {
+            --bg-color: #050505;
+            --p1-color: #0ff; /* Cyber Cyan */
+            --p2-color: #f0f; /* Hot Pink */
+            --grid-line: #1a2f42;
+            --glass-reflection: rgba(255, 255, 255, 0.05);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: #fff;
+            font-family: 'Courier New', monospace; /* Fonte monoespaçada retro */
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            text-shadow: 0 0 5px rgba(255,255,255,0.5);
+        }
+
+        /* EFEITO CRT (SCANLINES) */
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+            linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 999;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none; /* Deixa clicar através do efeito */
+        }
+
+        /* EFEITO VIGNETTE (Bordas escuras) */
+        body::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(0,0,0,1) 100%);
+            z-index: 998;
+            pointer-events: none;
+        }
+
+        /* LEADERBOARD (Placar) */
+        #leaderboard-bar {
+            position: absolute;
+            top: 10px;
+            display: flex;
+            gap: 30px;
+            background: #111;
+            padding: 5px 20px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            z-index: 10;
+            font-size: 0.9rem;
+            box-shadow: 0 0 15px rgba(0,255,255,0.1);
+        }
+        .score-val { font-weight: bold; font-size: 1.1rem; }
+
+        /* TABULEIRO */
+        .board {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(9, 1fr);
+            gap: 2px;
+            background-color: var(--grid-line);
+            border: 4px solid #334;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
+            width: 90vmin;  /* Responsivo: 90% da menor dimensão da tela */
+            height: 90vmin;
+            max-width: 500px;
+            max-height: 500px;
+            position: relative;
+        }
+
+        .cell {
+            background-color: #0b1016;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+
+        /* PEÇAS */
+        .piece {
+            width: 70%; height: 70%; border-radius: 50%;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: scale(0);
+            animation: popIn 0.3s forwards;
+            position: relative;
+        }
+        .piece::after { /* Brilho reflexivo na peça */
+            content: ''; position: absolute; top: 15%; left: 15%; width: 30%; height: 30%;
+            background: rgba(255,255,255,0.6); border-radius: 50%; filter: blur(1px);
+        }
+
+        .piece.p1 { background-color: var(--p1-color); box-shadow: 0 0 10px var(--p1-color); }
+        .piece.p2 { background-color: var(--p2-color); box-shadow: 0 0 10px var(--p2-color); }
+
+        @keyframes popIn { to { transform: scale(1); } }
+
+        /* ANIMAÇÃO DE VITÓRIA (O "FEIXE DE LUZ") */
+        .win-anim {
+            animation: pulseWin 0.5s infinite alternate !important;
+            z-index: 100;
+        }
+        @keyframes pulseWin {
+            from { transform: scale(1); filter: brightness(1.2); }
+            to { transform: scale(1.3); filter: brightness(2) drop-shadow(0 0 15px white); }
+        }
+
+        /* UI ELEMENTS */
+        #game-ui { display: none; flex-direction: column; align-items: center; width: 100%; z-index: 10; }
+        #lobby-ui { z-index: 10; text-align: center; background: rgba(0,0,0,0.8); padding: 40px; border: 1px solid #333; }
+
+        .btn {
+            background: transparent; color: #fff; border: 2px solid #fff;
+            padding: 10px 20px; font-family: inherit; font-size: 1.2rem; cursor: pointer;
+            text-transform: uppercase; transition: 0.2s;
+            box-shadow: 0 0 10px rgba(255,255,255,0.2);
+        }
+        .btn:hover { background: #fff; color: #000; box-shadow: 0 0 20px rgba(255,255,255,0.8); }
+
+        .status-text { margin: 15px 0; font-size: 1.2rem; letter-spacing: 2px; }
+
+        input { background: #000; color: #fff; border: 1px solid #555; padding: 10px; font-family: inherit; text-align: center; font-size: 1.2rem; margin-bottom: 10px; }
+
+    </style>
+</head>
+<body>
+
+<div id="leaderboard-bar">
+    <span style="color:var(--p1-color)">CYAN: <span id="score-p1" class="score-val">0</span></span>
+    <span style="color:#888">PARTIDAS: <span id="score-total" class="score-val">0</span></span>
+    <span style="color:var(--p2-color)">PINK: <span id="score-p2" class="score-val">0</span></span>
+</div>
+
+<div id="lobby-ui">
+    <h1 style="font-size: 3rem; margin: 0; color: #fff; text-shadow: 4px 4px var(--p2-color);">GOMOKU</h1>
+    <h2 style="font-size: 1.5rem; margin-top:0; color: var(--p1-color); letter-spacing: 5px;">REVOLUTION 9x9</h2>
+    <br>
+    <button class="btn" onclick="socket.emit('createRoom')">CRIAR SALA</button>
+    <br><br>
+    <input type="text" id="room-code" placeholder="CÓDIGO" maxlength="5">
+    <br>
+    <button class="btn" onclick="joinRoom()">ENTRAR</button>
+    <p id="room-display" style="font-size: 2rem; color: yellow; margin-top: 20px; min-height: 40px;"></p>
+</div>
+
+<div id="game-ui">
+    <div class="status-text" id="turn-indicator">AGUARDANDO...</div>
+
+    <div class="board" id="board"></div>
+
+    <div style="margin-top: 20px; display: flex; gap: 20px;">
+        <button class="btn" id="btn-bomb" onclick="toggleBomb()" style="border-color: #ff3333; color: #ff3333;">BOMBA (1)</button>
+        <button class="btn" onclick="requestRestart()" style="font-size: 0.8rem;">REINICIAR</button>
+    </div>
+</div>
+
+<script>
+    // --- AUDIO SYSTEM (Sintetizador Puro) ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(freq, type, dur, vol=0.1) {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    }
+
+    const SFX = {
+        move: () => playTone(300, 'sine', 0.1),
+        bomb: () => { playTone(100, 'sawtooth', 0.4); if(navigator.vibrate) navigator.vibrate(200); }, // VIBRAR CELULAR
+        win: () => {
+            [0, 100, 200, 300, 400].forEach((t, i) => setTimeout(() => playTone(400 + (i*100), 'square', 0.2), t));
+            if(navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]); // PADRÃO DE VIBRAÇÃO
+        }
+    };
+
+    // --- GAME LOGIC ---
+    const socket = io(); // Conexão automática
+
+    let myPlayer = 0;
+    let currentRoom = '';
+    let boardState = [];
+    let turnPlayer = 1;
+    let bombMode = false;
+    let hasBomb = true;
+    const BOARD_SIZE = 9;
+
+    // Socket Listeners
+    socket.on('updateLeaderboard', (stats) => {
+        document.getElementById('score-p1').innerText = stats.p1Wins;
+        document.getElementById('score-p2').innerText = stats.p2Wins;
+        document.getElementById('score-total').innerText = stats.matchesPlayed;
+    });
+
+    socket.on('roomCreated', (data) => {
+        currentRoom = data.roomId;
+        myPlayer = 1;
+        document.getElementById('room-display').innerText = data.roomId;
+    });
+
+    socket.on('roomJoined', (data) => {
+        currentRoom = data.roomId;
+        myPlayer = 2;
+        enterGame();
+    });
+
+    socket.on('startGame', () => {
+        if(myPlayer === 1) enterGame();
+    });
+
+    socket.on('moveMade', (data) => applyMove(data.row, data.col, data.player));
+
+    socket.on('powerUsed', (data) => {
+        const cell = document.querySelector(`.cell[data-r='${data.r}'][data-c='${data.c}']`);
+        cell.innerHTML = ''; // Limpa visual
+        boardState[data.r][data.c] = 0; // Limpa lógica
+        turnPlayer = turnPlayer === 1 ? 2 : 1;
+        updateUI();
+        SFX.bomb();
+    });
+
+    socket.on('restartGame', initBoard);
+
+    // Funções
+    function joinRoom() {
+        const code = document.getElementById('room-code').value.toUpperCase();
+        if(code) socket.emit('joinRoom', code);
+    }
+
+    function enterGame() {
+        document.getElementById('lobby-ui').style.display = 'none';
+        document.getElementById('game-ui').style.display = 'flex';
+        initBoard();
+    }
+
+    function initBoard() {
+        const b = document.getElementById('board');
+        b.innerHTML = '';
+        boardState = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
+        turnPlayer = 1;
+        hasBomb = true;
+        bombMode = false;
+
+        for(let r=0; r<BOARD_SIZE; r++) {
+            for(let c=0; c<BOARD_SIZE; c++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.r = r;
+                cell.dataset.c = c;
+                cell.onclick = () => handleClick(r, c);
+                b.appendChild(cell);
+            }
+        }
+        updateUI();
+    }
+
+    function handleClick(r, c) {
+        if(turnPlayer !== myPlayer) return;
+
+        if(bombMode) {
+            if(boardState[r][c] !== 0 && boardState[r][c] !== myPlayer) {
+                socket.emit('usePower', { roomId: currentRoom, r, c, player: myPlayer });
+                // Aplicar localmente
+                const cell = document.querySelector(`.cell[data-r='${r}'][data-c='${c}']`);
+                cell.innerHTML = '';
+                boardState[r][c] = 0;
+                hasBomb = false;
+                bombMode = false;
+                turnPlayer = turnPlayer === 1 ? 2 : 1;
+                updateUI();
+                SFX.bomb();
+            } else {
+                alert("Clique numa peça INIMIGA!");
+            }
+            return;
+        }
+
+        if(boardState[r][c] === 0) {
+            socket.emit('makeMove', { roomId: currentRoom, row: r, col: c, player: myPlayer });
+            applyMove(r, c, myPlayer);
+        }
+    }
+
+    function applyMove(r, c, p) {
+        boardState[r][c] = p;
+        const cell = document.querySelector(`.cell[data-r='${r}'][data-c='${c}']`);
+        cell.innerHTML = p === 1 ? '<div class="piece p1"></div>' : '<div class="piece p2"></div>';
+        SFX.move();
+
+        // Verifica Vitória
+        const winningLine = checkWin(r, c, p); // Agora retorna array de coordenadas!
+        if(winningLine) {
+            SFX.win();
+            animateWin(winningLine);
+            if(p === myPlayer) socket.emit('reportWin', p); // Envia ao server
+            setTimeout(() => alert(`JOGADOR ${p} VENCEU!`), 500);
+        } else {
+            turnPlayer = turnPlayer === 1 ? 2 : 1;
+            updateUI();
+        }
+    }
+
+    // --- LÓGICA ATUALIZADA: Retorna as coordenadas da vitória ---
+    function checkWin(row, col, player) {
+        const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+        for (let [dr, dc] of directions) {
+            let line = [[row, col]];
+            // Frente
+            let r = row + dr, c = col + dc;
+            while(r>=0 && r<BOARD_SIZE && c>=0 && c<BOARD_SIZE && boardState[r][c] === player) {
+                line.push([r, c]); r+=dr; c+=dc;
+            }
+            // Trás
+            r = row - dr; c = col - dc;
+            while(r>=0 && r<BOARD_SIZE && c>=0 && c<BOARD_SIZE && boardState[r][c] === player) {
+                line.push([r, c]); r-=dr; c-=dc;
+            }
+
+            if(line.length === 5) return line; // Retorna as peças!
+        }
+        return null;
+    }
+
+
+
+    function animateWin(cells) {
+        cells.forEach(([r,c], i) => {
+            setTimeout(() => {
+                const el = document.querySelector(`.cell[data-r='${r}'][data-c='${c}'] .piece`);
+                if(el) el.classList.add('win-anim');
+            }, i * 100); // Efeito cascata
+        });
+    }
+
+    function toggleBomb() {
+        if(turnPlayer === myPlayer && hasBomb) {
+            bombMode = !bombMode;
+            document.getElementById('btn-bomb').style.background = bombMode ? '#ff3333' : 'transparent';
+            document.getElementById('btn-bomb').style.color = bombMode ? '#000' : '#ff3333';
+        }
+    }
+
+    function updateUI() {
+        const msg = document.getElementById('turn-indicator');
+        const isMyTurn = turnPlayer === myPlayer;
+        msg.innerText = isMyTurn ? "SUA VEZ" : "VEZ DO OPONENTE";
+        msg.style.color = isMyTurn ? "#0f0" : "#888";
+
+        if(!hasBomb) {
+            const btn = document.getElementById('btn-bomb');
+            btn.style.opacity = 0.3;
+            btn.style.textDecoration = 'line-through';
+        }
+    }
+
+    function requestRestart() {
+        socket.emit('restartRequest', currentRoom);
+    }
+</script>
+</body>
+</html>
