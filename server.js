@@ -4,14 +4,12 @@ const { Server } = require('socket.io');
 const path = require('path');
 const cors = require('cors');
 
-const server = express();
-server.use(cors());
+const app = express();
+app.use(cors());
 
-server.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.use(express.static(path.join(__dirname, 'public')));
 
-const server = http.createServer(server);
+const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 // --- NOVO: Persistência de Dados (Placar Global) ---

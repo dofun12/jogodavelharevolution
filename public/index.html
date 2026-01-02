@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gomoku 9x9 - Arcade Edition</title>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <link rel="stylesheet" href="style.css"> </head>
+<body>
+
+<div id="leaderboard-bar">
+    <span style="color:var(--p1-color)">CYAN: <span id="score-p1" class="score-val">0</span></span>
+    <span style="color:#888">PARTIDAS: <span id="score-total" class="score-val">0</span></span>
+    <span style="color:var(--p2-color)">PINK: <span id="score-p2" class="score-val">0</span></span>
+</div>
+
+<div id="lobby-ui">
+    <h1 style="font-size: 3rem; margin: 0; color: #fff; text-shadow: 4px 4px var(--p2-color);">GOMOKU</h1>
+    <h2 style="font-size: 1.5rem; margin-top:0; color: var(--p1-color); letter-spacing: 5px;">REVOLUTION 9x9</h2>
+    <br>
+    <button class="btn" onclick="socket.emit('createRoom')">CRIAR SALA</button>
+    <br><br>
+    <input type="text" id="room-code" placeholder="CÓDIGO" maxlength="5">
+    <br>
+    <button class="btn" onclick="joinRoom()">ENTRAR</button>
+    <p id="room-display" style="font-size: 2rem; color: yellow; margin-top: 20px; min-height: 40px;"></p>
+</div>
+
+<div id="game-ui">
+    <div class="status-text" id="turn-indicator">AGUARDANDO...</div>
+
+    <div class="board" id="board"></div>
+
+    <div style="margin-top: 20px; display: flex; gap: 20px;">
+        <button class="btn" id="btn-bomb" onclick="toggleBomb()" style="border-color: #ff3333; color: #ff3333;">BOMBA (1)</button>
+        <button class="btn" onclick="requestRestart()" style="font-size: 0.8rem;">REINICIAR</button>
+    </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
